@@ -1,0 +1,43 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Generated audio and scratch output
+outputs/
+tmp/
+*.pcm
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Agent local state (symlinked skills and CLAUDE.md under .claude/ stay tracked)
+.claude/settings.local.json
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.artifacts/
+.agents/*.local.*
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
