@@ -39,6 +39,7 @@ jobs:
       - name: Deploy to Vercel production
         if: steps.credentials.outputs.enabled == 'true'
         run: |
+          rm -rf .git
           npm install --global vercel@latest
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           vercel build --prod --token="$VERCEL_TOKEN"

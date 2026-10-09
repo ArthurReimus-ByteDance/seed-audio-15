@@ -88,6 +88,7 @@ The app deploys to Vercel as is. Set `SEED_AUDIO_API_KEY` and `SEED_AUDIO_MODEL`
 
 - `.github/workflows/ci.yml` runs lint, type check, tests and the build, plus the Python helper tests, on every pull request and push to `main`.
 - `.github/workflows/deploy.yml` deploys `main` to production with the Vercel CLI after CI passes. It needs the repository secret `VERCEL_TOKEN` and the repository variables `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`, and skips itself when the token is missing.
+- On a Hobby plan Vercel blocks deployments whose git commit author is not the account owner. `deploy.yml` therefore removes `.git` before deploying, and a manual deploy from a clean export has the same effect. Link the commit author's GitHub account to your Vercel account to avoid this.
 - Alternatively, install the Vercel GitHub app for the repository and run `vercel git connect`. Vercel then deploys every push and creates previews for pull requests, and `deploy.yml` can be deleted.
 
 ## Project layout
