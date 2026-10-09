@@ -6,29 +6,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import bundledFfmpeg from "ffmpeg-static";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { buildMuxArgs, downloadDubAudio, downloadVideo, ffmpegCandidates, isFfmpegAvailable, MuxError, muxVideoWithAudio, resetFfmpegResolutionForTests, resolveFfmpeg, runFfmpeg } from "./mux";
+import { buildMuxArgs, downloadDubAudio, downloadVideo, ffmpegCandidates, isFfmpegAvailable, MuxError, muxVideoWithAudio, parseDurationSeconds, resetFfmpegResolutionForTests, resolveFfmpeg, runFfmpeg } from "./mux";
 import { UnsafeUrlError } from "./url-guard";
 
 const local = { allowLocalhost: true };
 
 describe("buildMuxArgs", () => {
-  it("copies the video stream, replaces the audio with AAC, pads it and stops at the video end", () => {
-    const args = buildMuxArgs("v.mp4", "a.wav", "out.mp4", "copy");
-    expect(args).toEqual(expect.arrayContaining(["-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-af", "apad", "-shortest", "+faststart"]));
+  it("copies the video stream, replaces the audio with AAC, pads it and ends exactly at the video length", () => {
+    const args = buildMuxArgs("v.mp4", "a.wav", "out.mp4", "copy", 5.28);
+    expect(args).toEqual(expect.arrayContaining(["-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-af", "apad", "-t", "5.280", "+faststart"]));
+    expect(args).not.toContain("-shortest");
     expect(args.indexOf("v.mp4")).toBeLessThan(args.indexOf("a.wav"));
     expect(args.at(-1)).toBe("out.mp4");
     expect(args).not.toContain("0:a");
   });
 
   it("re-encodes the picture to h264 in transcode mode", () => {
-    const args = buildMuxArgs("v", "a", "o.mp4", "transcode");
+    const args = buildMuxArgs("v", "a", "o.mp4", "transcode", 2);
     expect(args).toEqual(expect.arrayContaining(["-c:v", "libx264", "-pix_fmt", "yuv420p"]));
     expect(args).not.toContain("copy");
   });
 
   it("never builds a shell string: every input is its own argument", () => {
     const hostile = "x; rm -rf / #.mp4";
-    expect(buildMuxArgs(hostile, "a", "o.mp4", "copy")).toContain(hostile);
+    expect(buildMuxArgs(hostile, "a", "o.mp4", "copy", 2)).toContain(hostile);
   });
 });
 
@@ -103,13 +104,14 @@ describe("downloadVideo", () => {
 });
 
 const ffmpegReady = await isFfmpegAvailable();
-const probe = (file: string) => {
-  const output = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,codec_name:format=duration", "-of", "json", file]).stdout.toString();
-  const parsed = JSON.parse(output) as { streams: { codec_type: string; codec_name: string }[]; format: { duration: string } };
-  return { streams: parsed.streams, duration: Number(parsed.format.duration) };
+const probe = async (file: string) => {
+  const { stderr } = await runFfmpeg(["-hide_banner", "-i", file]);
+  const duration = /Duration: (\d+):(\d+):(\d+\.\d+)/.exec(stderr);
+  const streams = [...stderr.matchAll(/Stream #\d+:\d+[^:]*: (Video|Audio): (\w+)/g)].map((match) => ({ codec_type: match[1].toLowerCase(), codec_name: match[2] }));
+  return { streams, duration: duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : Number.NaN };
 };
 
-describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", () => {
+describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", { timeout: 60_000 }, () => {
   let directory: string;
   const make = async (name: string, args: string[]) => {
     const file = join(directory, name);
@@ -129,7 +131,7 @@ describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", () => {
   it("keeps the picture stream untouched, replaces the audio and matches the video length", async () => {
     const out = join(directory, "copy.mp4");
     expect(await muxVideoWithAudio(await sourceVideo(), await dub(4), out)).toBe("copy");
-    const { streams, duration } = probe(out);
+    const { streams, duration } = await probe(out);
     expect(streams.map((stream) => `${stream.codec_type}:${stream.codec_name}`).sort()).toEqual(["audio:aac", "video:h264"]);
     expect(duration).toBeGreaterThan(3.8);
     expect(duration).toBeLessThan(4.3);
@@ -138,13 +140,13 @@ describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", () => {
   it("pads a shorter dub with silence so the whole video is kept", async () => {
     const out = join(directory, "short.mp4");
     await muxVideoWithAudio(await sourceVideo(), await dub(2), out);
-    expect(probe(out).duration).toBeGreaterThan(3.8);
+    expect((await probe(out)).duration).toBeGreaterThan(3.8);
   });
 
   it("cuts a longer dub at the end of the video", async () => {
     const out = join(directory, "long.mp4");
     await muxVideoWithAudio(await sourceVideo(), await dub(9), out);
-    expect(probe(out).duration).toBeLessThan(4.4);
+    expect((await probe(out)).duration).toBeLessThan(4.4);
   });
 
   it("accepts mp3 and ogg dubs", async () => {
@@ -161,12 +163,25 @@ describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", () => {
   });
 
   it("falls back to re-encoding when the picture cannot be copied into mp4", async () => {
-    const hasVp8 = spawnSync("ffmpeg", ["-hide_banner", "-encoders"]).stdout.toString().includes("libvpx ");
-    if (!hasVp8) return;
-    const webm = await make("source.webm", ["-f", "lavfi", "-i", "testsrc=size=320x240:rate=25", "-t", "2", "-c:v", "libvpx", "-an"]);
+    const webm = join(directory, "source.webm");
+    const encoded = await runFfmpeg(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25", "-t", "2", "-c:v", "libvpx", "-an", webm]);
+    if (encoded.code !== 0) return;
     const out = join(directory, "transcoded.mp4");
     expect(await muxVideoWithAudio(webm, await dub(2), out)).toBe("transcode");
-    expect(probe(out).streams.map((stream) => stream.codec_name)).toContain("h264");
+    expect((await probe(out)).streams.map((stream) => stream.codec_name)).toContain("h264");
+  });
+});
+
+describe("parseDurationSeconds", () => {
+  it("reads the duration line of ffmpeg's input summary", () => {
+    expect(parseDurationSeconds("  Duration: 00:00:05.28, start: 0.000000, bitrate: 268 kb/s")).toBeCloseTo(5.28);
+    expect(parseDurationSeconds("Duration: 01:02:03.50, start")).toBeCloseTo(3723.5);
+  });
+
+  it("returns null when the length is unknown or zero", () => {
+    expect(parseDurationSeconds("  Duration: N/A, bitrate: N/A")).toBeNull();
+    expect(parseDurationSeconds("Duration: 00:00:00.00, start")).toBeNull();
+    expect(parseDurationSeconds("")).toBeNull();
   });
 });
 
@@ -179,7 +194,7 @@ describe("ffmpegCandidates", () => {
   });
 });
 
-describe("bundled ffmpeg (the binary a Vercel deployment would use)", () => {
+describe("bundled ffmpeg (the binary a Vercel deployment would use)", { timeout: 60_000 }, () => {
   it("is installed, executable and reports its version", () => {
     expect(bundledFfmpeg).toBeTruthy();
     const result = spawnSync(bundledFfmpeg as string, ["-version"]);

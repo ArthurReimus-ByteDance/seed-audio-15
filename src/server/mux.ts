@@ -84,7 +84,7 @@ export async function runFfmpeg(args: string[], timeoutMs = FFMPEG_TIMEOUT_MS): 
 
 export type VideoMode = "copy" | "transcode";
 
-export function buildMuxArgs(videoPath: string, audioPath: string, outputPath: string, mode: VideoMode): string[] {
+export function buildMuxArgs(videoPath: string, audioPath: string, outputPath: string, mode: VideoMode, videoSeconds: number): string[] {
   const video = mode === "copy" ? ["-c:v", "copy"] : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"];
   return [
     "-y", "-hide_banner", "-loglevel", "error",
@@ -96,7 +96,7 @@ export function buildMuxArgs(videoPath: string, audioPath: string, outputPath: s
     "-c:a", "aac",
     "-b:a", "192k",
     "-af", "apad",
-    "-shortest",
+    "-t", videoSeconds.toFixed(3),
     "-movflags", "+faststart",
     outputPath,
   ];
@@ -107,10 +107,25 @@ function lastLine(text: string): string {
   return lines[lines.length - 1] ?? "unknown error";
 }
 
+export function parseDurationSeconds(ffmpegOutput: string): number | null {
+  const match = /Duration: (\d+):(\d{2}):(\d{2}(?:\.\d+)?)/.exec(ffmpegOutput);
+  if (!match) return null;
+  const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+  return seconds > 0 ? seconds : null;
+}
+
+export async function probeVideoSeconds(videoPath: string): Promise<number> {
+  const { stderr } = await runFfmpeg(["-hide_banner", "-i", videoPath], PROBE_TIMEOUT_MS);
+  const seconds = parseDurationSeconds(stderr);
+  if (seconds === null) throw new MuxError("Could not read the length of the original video", 422);
+  return seconds;
+}
+
 export async function muxVideoWithAudio(videoPath: string, audioPath: string, outputPath: string): Promise<VideoMode> {
-  const copy = await runFfmpeg(buildMuxArgs(videoPath, audioPath, outputPath, "copy"));
+  const videoSeconds = await probeVideoSeconds(videoPath);
+  const copy = await runFfmpeg(buildMuxArgs(videoPath, audioPath, outputPath, "copy", videoSeconds));
   if (copy.code === 0) return "copy";
-  const transcode = await runFfmpeg(buildMuxArgs(videoPath, audioPath, outputPath, "transcode"));
+  const transcode = await runFfmpeg(buildMuxArgs(videoPath, audioPath, outputPath, "transcode", videoSeconds));
   if (transcode.code === 0) return "transcode";
   throw new MuxError(`Could not combine the audio with the video: ${lastLine(transcode.stderr)}`, 422);
 }
