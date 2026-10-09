@@ -56,6 +56,27 @@ def audio_source(value):
     return f"data:audio/{audio_format};base64,{encoded}"
 
 
+IMAGE_FORMATS = ("jpeg", "png", "webp", "bmp", "tiff", "gif", "heic", "heif")
+MAX_INLINE_IMAGE_BYTES = 10 * 1024 * 1024
+IMAGE_ALIASES = {"jpg": "jpeg", "tif": "tiff"}
+
+
+def image_source(value):
+    if value.startswith(("http://", "https://", "data:")):
+        return value
+    path = Path(value)
+    if not path.is_file():
+        raise SeedAudioError(f"Image file not found: {value}")
+    extension = path.suffix.lstrip(".").lower()
+    image_format = IMAGE_ALIASES.get(extension, extension)
+    if image_format not in IMAGE_FORMATS:
+        raise SeedAudioError(f"Unsupported image format '{extension}'")
+    if path.stat().st_size > MAX_INLINE_IMAGE_BYTES:
+        raise SeedAudioError(f"{value} exceeds the 10 MB image limit")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/{image_format};base64,{encoded}"
+
+
 def video_source(value):
     if not value.startswith(("http://", "https://", "tos://")):
         raise SeedAudioError("Video must be a public http(s) URL or a tos:// URI")
@@ -99,28 +120,34 @@ def audio_item(url, role):
     return {"type": "audio_url", "audio_url": {"url": url}, "role": role}
 
 
+def image_item(url):
+    return {"type": "image_url", "image_url": {"url": url}, "role": "reference_image"}
+
+
 def video_item(url, role):
     return {"type": "video_url", "video_url": {"url": url}, "role": role}
 
 
-def build_generate_payload(model, prompt, reference_audios=(), reference_video=None, output_format=None, audio_config=None):
+def build_generate_payload(model, prompt, reference_audios=(), reference_video=None, output_format=None, audio_config=None, reference_image=None):
     if not prompt or not prompt.strip():
         raise SeedAudioError("A non-empty prompt is required")
     if len(reference_audios) > MAX_REFERENCE_AUDIOS:
         raise SeedAudioError(f"At most {MAX_REFERENCE_AUDIOS} reference audios are supported")
+    if reference_image and (reference_audios or reference_video):
+        raise SeedAudioError("A reference image cannot be combined with reference audio or video")
     content = [text_item(prompt)]
+    if reference_image:
+        content.append(image_item(image_source(reference_image)))
     content.extend(audio_item(audio_source(item), "reference_audio") for item in reference_audios)
     if reference_video:
         content.append(video_item(video_source(reference_video), "reference_video"))
     return with_output_options({"model": model, "content": content}, output_format, audio_config)
 
 
-def build_translate_payload(model, video, target_language, source_language=None, glossaries=(), output_format=None, audio_config=None):
+def build_translate_payload(model, video, target_language, glossaries=(), output_format=None, audio_config=None):
     if not target_language:
         raise SeedAudioError("target_language is required for video translation")
     dubbing_config = {"target_language": target_language}
-    if source_language:
-        dubbing_config["source_language"] = source_language
     if glossaries:
         dubbing_config["glossaries"] = [parse_glossary(entry) for entry in glossaries]
     payload = {
@@ -217,12 +244,12 @@ def build_parser():
     prompt_group.add_argument("--prompt-file")
     generate.add_argument("--reference-audio", action="append", default=[])
     generate.add_argument("--reference-video")
+    generate.add_argument("--reference-image")
     add_output_arguments(generate)
 
     translate = subcommands.add_parser("translate", help="Video translation (dubbing)")
     translate.add_argument("--video", required=True)
     translate.add_argument("--target-language", required=True)
-    translate.add_argument("--source-language")
     translate.add_argument("--glossary", action="append", default=[])
     add_output_arguments(translate)
 
@@ -237,9 +264,9 @@ def build_payload(args, model):
     audio_config = build_audio_config(args.sample_rate, args.speech_rate, args.loudness_rate, args.pitch_rate, args.output_format)
     if args.command == "generate":
         prompt = Path(args.prompt_file).read_text() if args.prompt_file else args.prompt
-        return build_generate_payload(model, prompt, args.reference_audio, args.reference_video, args.output_format, audio_config)
+        return build_generate_payload(model, prompt, args.reference_audio, args.reference_video, args.output_format, audio_config, args.reference_image)
     if args.command == "translate":
-        return build_translate_payload(model, args.video, args.target_language, args.source_language, args.glossary, args.output_format, audio_config)
+        return build_translate_payload(model, args.video, args.target_language, args.glossary, args.output_format, audio_config)
     return build_separate_payload(model, args.audio, args.prompt, args.output_format, audio_config)
 
 

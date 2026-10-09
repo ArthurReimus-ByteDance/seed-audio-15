@@ -5,7 +5,9 @@ description: Write and refine prompts for Seed Audio 1.5 (BytePlus) audio genera
 
 # Seed Audio 1.5 Prompting
 
-The model is a text-to-audio generator, not plain TTS: the prompt describes a whole soundscape (voices, delivery, ambience, effects, music). Specific beats vague. Early access: pure BGM/music/SFX-only generation is not officially supported yet, so lead with speech-based prompts and treat sound-only prompts as experimental. Keep prompt content confidential.
+The model is a text-to-audio generator, not plain TTS: the prompt describes a whole soundscape (voices, delivery, ambience, effects, music). Specific beats vague.
+
+**Every prompt needs a spoken line.** Verified against the live early-access API: prompts without the exact words to speak, in quotes, are rejected with 400, including music-only, effects-only and "reproduce the lines from the video" prompts. Ambience and music are fine as *additions* to speech. For video-to-audio, write the line out; the model does not transcribe the video. Keep prompt content confidential.
 
 ## Pick a prompt style
 
