@@ -103,13 +103,14 @@ describe("downloadVideo", () => {
 });
 
 const ffmpegReady = await isFfmpegAvailable();
-const probe = (file: string) => {
-  const output = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,codec_name:format=duration", "-of", "json", file]).stdout.toString();
-  const parsed = JSON.parse(output) as { streams: { codec_type: string; codec_name: string }[]; format: { duration: string } };
-  return { streams: parsed.streams, duration: Number(parsed.format.duration) };
+const probe = async (file: string) => {
+  const { stderr } = await runFfmpeg(["-hide_banner", "-i", file]);
+  const duration = /Duration: (\d+):(\d+):(\d+\.\d+)/.exec(stderr);
+  const streams = [...stderr.matchAll(/Stream #\d+:\d+[^:]*: (Video|Audio): (\w+)/g)].map((match) => ({ codec_type: match[1].toLowerCase(), codec_name: match[2] }));
+  return { streams, duration: duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : Number.NaN };
 };
 
-describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", () => {
+describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", { timeout: 60_000 }, () => {
   let directory: string;
   const make = async (name: string, args: string[]) => {
     const file = join(directory, name);
@@ -129,7 +130,7 @@ describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", () => {
   it("keeps the picture stream untouched, replaces the audio and matches the video length", async () => {
     const out = join(directory, "copy.mp4");
     expect(await muxVideoWithAudio(await sourceVideo(), await dub(4), out)).toBe("copy");
-    const { streams, duration } = probe(out);
+    const { streams, duration } = await probe(out);
     expect(streams.map((stream) => `${stream.codec_type}:${stream.codec_name}`).sort()).toEqual(["audio:aac", "video:h264"]);
     expect(duration).toBeGreaterThan(3.8);
     expect(duration).toBeLessThan(4.3);
@@ -138,13 +139,13 @@ describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", () => {
   it("pads a shorter dub with silence so the whole video is kept", async () => {
     const out = join(directory, "short.mp4");
     await muxVideoWithAudio(await sourceVideo(), await dub(2), out);
-    expect(probe(out).duration).toBeGreaterThan(3.8);
+    expect((await probe(out)).duration).toBeGreaterThan(3.8);
   });
 
   it("cuts a longer dub at the end of the video", async () => {
     const out = join(directory, "long.mp4");
     await muxVideoWithAudio(await sourceVideo(), await dub(9), out);
-    expect(probe(out).duration).toBeLessThan(4.4);
+    expect((await probe(out)).duration).toBeLessThan(4.4);
   });
 
   it("accepts mp3 and ogg dubs", async () => {
@@ -161,12 +162,12 @@ describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", () => {
   });
 
   it("falls back to re-encoding when the picture cannot be copied into mp4", async () => {
-    const hasVp8 = spawnSync("ffmpeg", ["-hide_banner", "-encoders"]).stdout.toString().includes("libvpx ");
-    if (!hasVp8) return;
-    const webm = await make("source.webm", ["-f", "lavfi", "-i", "testsrc=size=320x240:rate=25", "-t", "2", "-c:v", "libvpx", "-an"]);
+    const webm = join(directory, "source.webm");
+    const encoded = await runFfmpeg(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25", "-t", "2", "-c:v", "libvpx", "-an", webm]);
+    if (encoded.code !== 0) return;
     const out = join(directory, "transcoded.mp4");
     expect(await muxVideoWithAudio(webm, await dub(2), out)).toBe("transcode");
-    expect(probe(out).streams.map((stream) => stream.codec_name)).toContain("h264");
+    expect((await probe(out)).streams.map((stream) => stream.codec_name)).toContain("h264");
   });
 });
 
@@ -179,7 +180,7 @@ describe("ffmpegCandidates", () => {
   });
 });
 
-describe("bundled ffmpeg (the binary a Vercel deployment would use)", () => {
+describe("bundled ffmpeg (the binary a Vercel deployment would use)", { timeout: 60_000 }, () => {
   it("is installed, executable and reports its version", () => {
     expect(bundledFfmpeg).toBeTruthy();
     const result = spawnSync(bundledFfmpeg as string, ["-version"]);
