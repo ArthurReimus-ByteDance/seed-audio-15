@@ -47,3 +47,4 @@ next-env.d.ts
 *.swp
 .DS_Store
 Thumbs.db
+.env*
