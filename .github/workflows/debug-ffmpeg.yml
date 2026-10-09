@@ -13,24 +13,22 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: system ffmpeg
+      - run: nproc; free -m | head -2
+      - name: mux tests alone
+        run: npx vitest run src/server/mux.test.ts --reporter=verbose --testTimeout=20000 -t "keeps the picture" 2>&1 | tail -40
+      - name: strace-like probe of the first helper
         run: |
-          which ffmpeg || echo "no system ffmpeg"
-          ffmpeg -version | head -1 || true
-          (timeout 30 ffmpeg -y -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=25 -f lavfi -i sine=frequency=300 -t 4 -c:v libx264 -pix_fmt yuv420p -c:a aac /tmp/s.mp4 </dev/null; echo "system exit $?") 2>&1 | tail -5
-      - name: bundled ffmpeg
-        run: |
-          ls -la node_modules/ffmpeg-static/ffmpeg || echo "NO BUNDLED BINARY"
-          node_modules/ffmpeg-static/ffmpeg -version | head -1 || true
-          (timeout 30 node_modules/ffmpeg-static/ffmpeg -y -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=25 -t 2 -c:v libx264 -pix_fmt yuv420p /tmp/b.mp4 </dev/null; echo "bundled exit $?") 2>&1 | tail -5
-      - name: node spawn like the app
-        run: |
-          cat > /tmp/spawn.mjs <<'JS'
+          cat > /tmp/probe.mjs <<'JS'
           import { spawn } from "node:child_process";
-          const t = Date.now();
-          const child = spawn("ffmpeg", ["-y","-hide_banner","-loglevel","error","-f","lavfi","-i","sine=frequency=880","-t","2","/tmp/x.wav"], { stdio: ["ignore","ignore","pipe"] });
-          child.stderr.on("data", d => console.log("stderr", d.toString()));
-          child.on("close", c => console.log("closed", c, Date.now()-t, "ms"));
-          setTimeout(() => { console.log("STILL RUNNING after 20s"); child.kill("SIGKILL"); }, 20000);
+          import ffmpeg from "/home/runner/work/seed-audio-15/seed-audio-15/node_modules/ffmpeg-static/index.js";
+          const run = (args) => new Promise((resolve) => {
+            const t = Date.now();
+            const child = spawn(ffmpeg, args, { stdio: ["ignore", "ignore", "pipe"] });
+            let err = "";
+            child.stderr.on("data", d => err += d);
+            child.on("close", c => resolve({ code: c, ms: Date.now() - t, err: err.slice(-300) }));
+            setTimeout(() => child.kill("SIGKILL"), 25000);
+          });
+          console.log(await run(["-y","-hide_banner","-loglevel","error","-f","lavfi","-i","testsrc=size=320x240:rate=25","-f","lavfi","-i","sine=frequency=300","-t","4","-c:v","libx264","-pix_fmt","yuv420p","-c:a","aac","/tmp/source.mp4"]));
           JS
-          node /tmp/spawn.mjs
+          node /tmp/probe.mjs
