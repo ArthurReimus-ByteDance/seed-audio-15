@@ -6,29 +6,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import bundledFfmpeg from "ffmpeg-static";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { buildMuxArgs, downloadDubAudio, downloadVideo, ffmpegCandidates, isFfmpegAvailable, MuxError, muxVideoWithAudio, resetFfmpegResolutionForTests, resolveFfmpeg, runFfmpeg } from "./mux";
+import { buildMuxArgs, downloadDubAudio, downloadVideo, ffmpegCandidates, isFfmpegAvailable, MuxError, muxVideoWithAudio, parseDurationSeconds, resetFfmpegResolutionForTests, resolveFfmpeg, runFfmpeg } from "./mux";
 import { UnsafeUrlError } from "./url-guard";
 
 const local = { allowLocalhost: true };
 
 describe("buildMuxArgs", () => {
-  it("copies the video stream, replaces the audio with AAC, pads it and stops at the video end", () => {
-    const args = buildMuxArgs("v.mp4", "a.wav", "out.mp4", "copy");
-    expect(args).toEqual(expect.arrayContaining(["-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-af", "apad", "-shortest", "+faststart"]));
+  it("copies the video stream, replaces the audio with AAC, pads it and ends exactly at the video length", () => {
+    const args = buildMuxArgs("v.mp4", "a.wav", "out.mp4", "copy", 5.28);
+    expect(args).toEqual(expect.arrayContaining(["-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-af", "apad", "-t", "5.280", "+faststart"]));
+    expect(args).not.toContain("-shortest");
     expect(args.indexOf("v.mp4")).toBeLessThan(args.indexOf("a.wav"));
     expect(args.at(-1)).toBe("out.mp4");
     expect(args).not.toContain("0:a");
   });
 
   it("re-encodes the picture to h264 in transcode mode", () => {
-    const args = buildMuxArgs("v", "a", "o.mp4", "transcode");
+    const args = buildMuxArgs("v", "a", "o.mp4", "transcode", 2);
     expect(args).toEqual(expect.arrayContaining(["-c:v", "libx264", "-pix_fmt", "yuv420p"]));
     expect(args).not.toContain("copy");
   });
 
   it("never builds a shell string: every input is its own argument", () => {
     const hostile = "x; rm -rf / #.mp4";
-    expect(buildMuxArgs(hostile, "a", "o.mp4", "copy")).toContain(hostile);
+    expect(buildMuxArgs(hostile, "a", "o.mp4", "copy", 2)).toContain(hostile);
   });
 });
 
@@ -168,6 +169,19 @@ describe.skipIf(!ffmpegReady)("muxVideoWithAudio (real ffmpeg)", { timeout: 60_0
     const out = join(directory, "transcoded.mp4");
     expect(await muxVideoWithAudio(webm, await dub(2), out)).toBe("transcode");
     expect((await probe(out)).streams.map((stream) => stream.codec_name)).toContain("h264");
+  });
+});
+
+describe("parseDurationSeconds", () => {
+  it("reads the duration line of ffmpeg's input summary", () => {
+    expect(parseDurationSeconds("  Duration: 00:00:05.28, start: 0.000000, bitrate: 268 kb/s")).toBeCloseTo(5.28);
+    expect(parseDurationSeconds("Duration: 01:02:03.50, start")).toBeCloseTo(3723.5);
+  });
+
+  it("returns null when the length is unknown or zero", () => {
+    expect(parseDurationSeconds("  Duration: N/A, bitrate: N/A")).toBeNull();
+    expect(parseDurationSeconds("Duration: 00:00:00.00, start")).toBeNull();
+    expect(parseDurationSeconds("")).toBeNull();
   });
 });
 
