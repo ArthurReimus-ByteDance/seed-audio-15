@@ -79,6 +79,29 @@ class GeneratePayloadTests(unittest.TestCase):
         self.assertEqual(payload["content"][1]["video_url"]["url"], "tos://bucket/p/v.mp4")
 
 
+class ReferenceImageTests(unittest.TestCase):
+    def test_adds_a_reference_image_item_with_its_role(self):
+        payload = seed_audio.build_generate_payload(MODEL, "Hi", reference_image="https://x.test/i.png")
+        self.assertEqual(payload["content"][1], {"type": "image_url", "image_url": {"url": "https://x.test/i.png"}, "role": "reference_image"})
+
+    def test_rejects_combining_with_audio_or_video(self):
+        for kwargs in ({"reference_audios": ["https://x.test/a.wav"]}, {"reference_video": "https://x.test/v.mp4"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(seed_audio.SeedAudioError):
+                seed_audio.build_generate_payload(MODEL, "Hi", reference_image="https://x.test/i.png", **kwargs)
+
+    def test_local_images_become_data_uris_and_bad_ones_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            good = Path(directory) / "pic.JPG"
+            good.write_bytes(b"x")
+            self.assertTrue(seed_audio.image_source(str(good)).startswith("data:image/jpeg;base64,"))
+            bad = Path(directory) / "pic.svg"
+            bad.write_bytes(b"x")
+            with self.assertRaises(seed_audio.SeedAudioError):
+                seed_audio.image_source(str(bad))
+            with self.assertRaises(seed_audio.SeedAudioError):
+                seed_audio.image_source(str(Path(directory) / "missing.png"))
+
+
 class AudioSourceTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -117,12 +140,10 @@ class TranslatePayloadTests(unittest.TestCase):
         self.assertEqual(payload["content"][0]["role"], "dubbing_video")
         self.assertEqual(payload["dubbing_config"], {"target_language": "en"})
 
-    def test_glossaries_and_source_language(self):
-        payload = seed_audio.build_translate_payload(
-            MODEL, "https://x.test/s.mp4", "en", "zh", ["火山方舟=ModelArk"]
-        )
+    def test_glossaries_are_sent_and_source_language_never_is(self):
+        payload = seed_audio.build_translate_payload(MODEL, "https://x.test/s.mp4", "en", ["火山方舟=ModelArk"])
         self.assertEqual(payload["dubbing_config"]["glossaries"], [{"source": "火山方舟", "target": "ModelArk"}])
-        self.assertEqual(payload["dubbing_config"]["source_language"], "zh")
+        self.assertNotIn("source_language", payload["dubbing_config"])
 
     def test_requires_target_language(self):
         with self.assertRaises(seed_audio.SeedAudioError):
