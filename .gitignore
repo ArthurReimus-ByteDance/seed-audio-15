@@ -24,9 +24,15 @@ htmlcov/
 dist/
 build/
 
-# Node
+# Node and Next.js
 node_modules/
 npm-debug.log*
+/.next/
+/out/
+/coverage
+*.tsbuildinfo
+next-env.d.ts
+.vercel
 
 # Agent local state (symlinked skills and CLAUDE.md under .claude/ stay tracked)
 .claude/settings.local.json
