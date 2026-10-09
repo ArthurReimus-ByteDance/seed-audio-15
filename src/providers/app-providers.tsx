@@ -42,7 +42,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
         <TooltipProvider delayDuration={150}>
           <StoreHydrator />
           {children}
-          <Toaster position="bottom-right" />
+          <Toaster position="bottom-right" visibleToasts={3} />
         </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>

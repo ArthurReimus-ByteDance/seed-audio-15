@@ -6,8 +6,8 @@ export function requestBodyBytes(request: unknown): number {
   return new TextEncoder().encode(JSON.stringify(request)).length;
 }
 
-export function exceedsRequestLimit(bytes: number): boolean {
-  return bytes > MAX_REQUEST_BYTES + SLACK_BYTES;
+export function exceedsRequestLimit(bytes: number, limit: number = MAX_REQUEST_BYTES): boolean {
+  return bytes > limit + SLACK_BYTES;
 }
 
 export function describeSize(bytes: number): string {

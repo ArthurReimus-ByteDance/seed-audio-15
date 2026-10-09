@@ -1,6 +1,8 @@
 import { connection, NextResponse } from "next/server";
 import { endpointHost, getServerEnv, isConfigured, maskModelId } from "@/server/env";
+import { getRequestLimitBytes } from "@/server/limits";
 import { getLimiter } from "@/server/limiter";
+import { isFfmpegAvailable } from "@/server/mux";
 
 export async function GET() {
   await connection();
@@ -14,5 +16,7 @@ export async function GET() {
     endpointHost: endpointHost(env.endpoint),
     modelHint: maskModelId(env.model),
     accessGate: Boolean(env.accessCode),
+    ffmpeg: await isFfmpegAvailable(),
+    maxRequestBytes: getRequestLimitBytes(),
   });
 }

@@ -27,6 +27,7 @@ import { PromptInsights } from "./prompt-insights";
 import { PromptPicker } from "./prompt-picker";
 import { PromptToolkit } from "./prompt-toolkit";
 import { ReferenceAudioField } from "./reference-audio-field";
+import { MuxOption } from "./mux-option";
 import { ReferenceImageField } from "./reference-image-field";
 import { RequestPreview } from "./request-preview";
 import { EmptyResults, JobCard } from "./run-results";
@@ -65,6 +66,7 @@ function initialForm(mode: StudioMode): StudioFormState {
     videoSource: saved.videoSource,
     targetLanguage: saved.targetLanguage,
     glossaries: saved.glossaries,
+    muxVideo: saved.muxVideo ?? false,
     takes: saved.takes,
   };
 }
@@ -118,6 +120,7 @@ function StudioWorkspace({ mode }: { mode: StudioMode }) {
           videoSource: form.videoSource,
           targetLanguage: form.targetLanguage,
           glossaries: form.glossaries,
+          muxVideo: form.muxVideo,
           takes: form.takes,
         }),
       400,
@@ -125,7 +128,9 @@ function StudioWorkspace({ mode }: { mode: StudioMode }) {
     return () => clearTimeout(timer);
   }, [form, mode, saveDraft]);
 
-  const validation = useMemo(() => validateStudioForm(mode, form, config), [mode, form, config]);
+  const maxRequestBytes = status.data?.maxRequestBytes;
+  const requestLimits = useMemo(() => (maxRequestBytes ? { maxRequestBytes } : undefined), [maxRequestBytes]);
+  const validation = useMemo(() => validateStudioForm(mode, form, config, requestLimits), [mode, form, config, requestLimits]);
   const errors = useMemo(() => (validation.ok ? {} : visibleErrors(validation.errors, form, attempted)), [validation, form, attempted]);
   const previewRequest = developerOpen && validation.ok ? validation.request : null;
   const limits = clipLimits(mode);
@@ -164,13 +169,13 @@ function StudioWorkspace({ mode }: { mode: StudioMode }) {
   };
 
   const submit = () => {
-    const result = validateStudioForm(mode, form, config);
+    const result = validateStudioForm(mode, form, config, requestLimits);
     if (!result.ok) {
       setAttempted(true);
       toast.error("Check the highlighted fields");
       return;
     }
-    submitJob({ request: result.request, title: definition.title, takes: form.takes });
+    submitJob({ request: result.request, title: definition.title, takes: form.takes, muxVideo: mode === "video-translation" && form.muxVideo && status.data?.ffmpeg !== false });
   };
 
   const reuse = (job: Job) => {
@@ -282,6 +287,10 @@ function StudioWorkspace({ mode }: { mode: StudioMode }) {
                   onTargetChange={(targetLanguage) => patchForm({ targetLanguage })}
                   onGlossariesChange={(glossaries) => patchForm({ glossaries })}
                 />
+              ) : null}
+
+              {mode === "video-translation" ? (
+                <MuxOption checked={form.muxVideo} available={status.data?.ffmpeg} error={errors.mux} onChange={(muxVideo) => patchForm({ muxVideo })} />
               ) : null}
 
               <div className="space-y-3 border-t pt-4">

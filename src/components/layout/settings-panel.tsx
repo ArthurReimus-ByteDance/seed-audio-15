@@ -129,6 +129,9 @@ export function SettingsPanel() {
             <Row label="Concurrency">
               {data.inFlight} of {data.maxConcurrency} running{data.queued > 0 ? `, ${data.queued} queued` : ""}
             </Row>
+            <Row label="Video muxing (ffmpeg)">
+              {data.ffmpeg ? <Badge className="bg-success/15 text-success">Available</Badge> : <span className="text-muted-foreground">Not found (set FFMPEG_PATH)</span>}
+            </Row>
             <Row label="Access code">
               {data.accessGate ? (
                 <span className="flex items-center gap-2">

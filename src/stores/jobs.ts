@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import { create } from "zustand";
 import { generateAudio, type GeneratedRun } from "@/lib/api/seed-audio";
 import { getErrorMessage, RequestCancelled } from "@/lib/api/http";
+import { muxDubbedVideo, originalAudioUrl } from "@/lib/api/mux";
 import { buildHistoryEntry } from "@/lib/history-persist";
 import { MODE_DEFINITIONS, type StudioMode } from "@/lib/seed-audio/modes";
 import type { GenerateRequest } from "@/lib/seed-audio/schemas";
@@ -12,7 +13,9 @@ export const JOB_LIMIT = 40;
 
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
-export type JobResult = { entryId: string | null; createdAt: number; run: GeneratedRun; urls: string[]; savedToHistory: boolean };
+export type MuxState = { status: "running" | "done" | "failed"; url?: string; size?: number; error?: string };
+
+export type JobResult = { entryId: string | null; createdAt: number; run: GeneratedRun; urls: string[]; savedToHistory: boolean; mux: MuxState | null };
 
 export type Job = {
   id: string;
@@ -22,6 +25,7 @@ export type Job = {
   mode: StudioMode;
   title: string;
   request: GenerateRequest;
+  autoMux: boolean;
   status: JobStatus;
   startedAt: number;
   finishedAt?: number;
@@ -29,25 +33,34 @@ export type Job = {
   result?: JobResult;
 };
 
-type SubmitInput = { request: GenerateRequest; title: string; takes: number };
+type SubmitInput = { request: GenerateRequest; title: string; takes: number; muxVideo?: boolean };
 
 type JobsState = {
   jobs: Job[];
   submit: (input: SubmitInput) => string[];
   cancel: (id: string) => void;
   retry: (id: string) => void;
+  createDubbedVideo: (id: string) => Promise<void>;
+  cancelDubbedVideo: (id: string) => void;
   dismiss: (id: string) => void;
   dismissFinished: (mode: StudioMode) => void;
 };
 
 const controllers = new Map<string, AbortController>();
+const muxControllers = new Map<string, AbortController>();
 let navigate: ((href: string) => void) | null = null;
 
 export function registerJobNavigator(handler: ((href: string) => void) | null) {
   navigate = handler;
 }
 
-const revokeUrls = (job: Job) => job.result?.urls.forEach((url) => URL.revokeObjectURL(url));
+const isOnPage = (mode: StudioMode) => typeof window !== "undefined" && window.location.pathname === MODE_HREFS[mode];
+
+const revokeUrls = (job: Job) => {
+  job.result?.urls.forEach((url) => URL.revokeObjectURL(url));
+  if (job.result?.mux?.url) URL.revokeObjectURL(job.result.mux.url);
+  muxControllers.get(job.id)?.abort();
+};
 
 export const useJobsStore = create<JobsState>()((set, get) => {
   const patch = (id: string, change: Partial<Job>) =>
@@ -80,10 +93,13 @@ export const useJobsStore = create<JobsState>()((set, get) => {
         savedToHistory = false;
         toast.warning("Generated, but the audio could not be saved to history (browser storage may be full).");
       }
-      patch(job.id, { status: "succeeded", finishedAt: Date.now(), result: { entryId, createdAt, run, urls, savedToHistory } });
-      toast.success(`${MODE_DEFINITIONS[job.mode].title}${label ? ` (${label})` : ""} is ready`, {
-        action: navigate ? { label: "View", onClick: () => navigate?.(MODE_HREFS[job.mode]) } : undefined,
-      });
+      patch(job.id, { status: "succeeded", finishedAt: Date.now(), result: { entryId, createdAt, run, urls, savedToHistory, mux: null } });
+      if (!isOnPage(job.mode)) {
+        toast.success(`${MODE_DEFINITIONS[job.mode].title}${label ? ` (${label})` : ""} is ready`, {
+          action: navigate ? { label: "View", onClick: () => navigate?.(MODE_HREFS[job.mode]) } : undefined,
+        });
+      }
+      if (job.autoMux && job.mode === "video-translation") void get().createDubbedVideo(job.id);
     } catch (error) {
       if (error instanceof RequestCancelled) {
         patch(job.id, { status: "cancelled", finishedAt: Date.now() });
@@ -97,9 +113,12 @@ export const useJobsStore = create<JobsState>()((set, get) => {
     }
   };
 
+  const patchMux = (id: string, mux: MuxState | null) =>
+    set((state) => ({ jobs: state.jobs.map((job) => (job.id === id && job.result ? { ...job, result: { ...job.result, mux } } : job)) }));
+
   return {
     jobs: [],
-    submit: ({ request, title, takes }) => {
+    submit: ({ request, title, takes, muxVideo }) => {
       const groupId = crypto.randomUUID();
       const created: Job[] = Array.from({ length: takes }, (_, index) => ({
         id: crypto.randomUUID(),
@@ -109,6 +128,7 @@ export const useJobsStore = create<JobsState>()((set, get) => {
         mode: request.mode,
         title,
         request,
+        autoMux: Boolean(muxVideo),
         status: "running",
         startedAt: Date.now(),
       }));
@@ -122,8 +142,38 @@ export const useJobsStore = create<JobsState>()((set, get) => {
       const job = get().jobs.find((candidate) => candidate.id === id);
       if (!job || job.status === "running") return;
       get().dismiss(id);
-      get().submit({ request: job.request, title: job.title, takes: 1 });
+      get().submit({ request: job.request, title: job.title, takes: 1, muxVideo: job.autoMux });
     },
+    createDubbedVideo: async (id) => {
+      const job = get().jobs.find((candidate) => candidate.id === id);
+      const track = job?.result?.run.tracks[0];
+      if (!job || !job.result || !track || job.request.mode !== "video-translation") return;
+      if (job.result.mux?.status === "running") return;
+      const controller = new AbortController();
+      muxControllers.set(id, controller);
+      patchMux(id, { status: "running" });
+      try {
+        const video = await muxDubbedVideo(job.request.video, { url: originalAudioUrl(track.url), blob: track.blob }, controller.signal);
+        const url = URL.createObjectURL(video);
+        if (!get().jobs.some((candidate) => candidate.id === id)) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        patchMux(id, { status: "done", url, size: video.size });
+        if (!isOnPage(job.mode)) toast.success("Dubbed video is ready");
+      } catch (error) {
+        if (error instanceof RequestCancelled) {
+          patchMux(id, null);
+        } else {
+          const message = getErrorMessage(error);
+          patchMux(id, { status: "failed", error: message });
+          toast.error(message);
+        }
+      } finally {
+        muxControllers.delete(id);
+      }
+    },
+    cancelDubbedVideo: (id) => muxControllers.get(id)?.abort(),
     dismiss: (id) => {
       const job = get().jobs.find((candidate) => candidate.id === id);
       if (!job || job.status === "running") return;

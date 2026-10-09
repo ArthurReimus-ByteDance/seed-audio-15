@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, ChevronUp, CircleAlert, Copy, RotateCcw, Sparkles, Terminal, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, CircleAlert, Copy, Download, Film, Loader2, RotateCcw, Sparkles, Terminal, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { GeneratingBars } from "@/components/audio/generating-bars";
@@ -10,8 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useElapsedSeconds } from "@/hooks/use-elapsed";
+import { useServiceStatus } from "@/hooks/use-service-status";
 import { copyText } from "@/lib/clipboard";
-import { downloadFileName, formatDuration, formatTimestamp } from "@/lib/format";
+import { downloadFileName, formatBytes, formatDuration, formatTimestamp } from "@/lib/format";
 import { MODE_DEFINITIONS } from "@/lib/seed-audio/modes";
 import { buildUpstreamPayload } from "@/lib/seed-audio/payload";
 import { toCurl } from "@/lib/seed-audio/inspect";
@@ -148,6 +149,64 @@ function JobDetails({ job }: { job: Job }) {
   );
 }
 
+function DubbedVideo({ job }: { job: Job }) {
+  const create = useJobsStore((state) => state.createDubbedVideo);
+  const cancel = useJobsStore((state) => state.cancelDubbedVideo);
+  const ffmpeg = useServiceStatus().data?.ffmpeg;
+  const result = job.result;
+  if (!result || job.request.mode !== "video-translation") return null;
+  const mux = result.mux;
+  const rawPcm = result.run.outputFormat === "pcm";
+  const language = job.request.targetLanguage;
+
+  if (mux?.status === "done" && mux.url) {
+    return (
+      <div className="space-y-2 rounded-xl border bg-card p-3">
+        <video src={mux.url} controls preload="metadata" className="aspect-video w-full rounded-lg bg-black" aria-label="Dubbed video" />
+        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span>Dubbed video{mux.size ? ` · ${formatBytes(mux.size)}` : ""} · original audio replaced</span>
+          <Button asChild variant="outline" size="sm">
+            <a href={mux.url} download={downloadFileName(`seed-audio-dubbed-${language}`, "mp4")}>
+              <Download /> Download mp4
+            </a>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mux?.status === "running") {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
+        <span className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="size-4 animate-spin text-brand" /> Combining the dub with the original video...
+        </span>
+        <Button type="button" variant="ghost" size="sm" onClick={() => cancel(job.id)}>
+          <X /> Cancel
+        </Button>
+      </div>
+    );
+  }
+
+  const disabledReason = ffmpeg === false ? "ffmpeg was not found on the server" : rawPcm ? "Raw PCM can't be combined with video" : null;
+
+  return (
+    <div className="space-y-2">
+      {mux?.status === "failed" ? (
+        <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
+          {mux.error}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" variant="outline" size="sm" disabled={Boolean(disabledReason)} onClick={() => void create(job.id)}>
+          <Film /> {mux?.status === "failed" ? "Try again" : "Create dubbed video"}
+        </Button>
+        <span className="text-xs text-muted-foreground">{disabledReason ?? "Replaces the original audio with this dub and returns an mp4."}</span>
+      </div>
+    </div>
+  );
+}
+
 function SucceededCard({ job, onReuse }: { job: Job; onReuse: (job: Job) => void }) {
   const dismiss = useJobsStore((state) => state.dismiss);
   const [showDetails, setShowDetails] = useState(false);
@@ -200,6 +259,7 @@ function SucceededCard({ job, onReuse }: { job: Job; onReuse: (job: Job) => void
             />
           ))}
         </div>
+        <DubbedVideo job={job} />
         <Button type="button" variant="ghost" size="xs" onClick={() => setShowDetails((value) => !value)} aria-expanded={showDetails}>
           <Terminal /> Details {showDetails ? <ChevronUp /> : <ChevronDown />}
         </Button>

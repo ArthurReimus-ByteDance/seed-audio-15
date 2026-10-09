@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { buildUpstreamPayload } from "@/lib/seed-audio/payload";
 import { generateRequestSchema } from "@/lib/seed-audio/schemas";
-import { describeSize, exceedsRequestLimit, MAX_REQUEST_BYTES } from "@/lib/seed-audio/size";
+import { describeSize, exceedsRequestLimit } from "@/lib/seed-audio/size";
 import { getServerEnv, isConfigured } from "@/server/env";
+import { getRequestLimitBytes } from "@/server/limits";
 import { getLimiter } from "@/server/limiter";
 import { callSeedAudio, UpstreamError } from "@/server/upstream";
 
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 const toProxyUrl = (upstreamUrl: string) => `/api/audio?src=${encodeURIComponent(upstreamUrl)}`;
 
@@ -20,9 +21,10 @@ export async function POST(request: Request) {
   }
 
   const declaredBytes = Number(request.headers.get("content-length") ?? 0);
-  if (exceedsRequestLimit(declaredBytes)) {
+  const limit = getRequestLimitBytes();
+  if (exceedsRequestLimit(declaredBytes, limit)) {
     return NextResponse.json(
-      { error: `The request is ${describeSize(declaredBytes)}, over the ${describeSize(MAX_REQUEST_BYTES)} limit. Use public URLs for some audio instead of uploading it.` },
+      { error: `The request is ${describeSize(declaredBytes)}, over the ${describeSize(limit)} limit. Use public URLs for some audio instead of uploading it.` },
       { status: 413 },
     );
   }

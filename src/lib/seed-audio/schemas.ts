@@ -157,6 +157,8 @@ export const statusSchema = z.object({
   endpointHost: z.string(),
   modelHint: z.string().nullable(),
   accessGate: z.boolean(),
+  ffmpeg: z.boolean(),
+  maxRequestBytes: z.number(),
 });
 
 export type ServiceStatus = z.infer<typeof statusSchema>;

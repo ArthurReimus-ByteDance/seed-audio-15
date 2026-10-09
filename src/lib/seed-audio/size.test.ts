@@ -18,3 +18,13 @@ describe("request size", () => {
     expect(describeSize(0)).toBe("0.0 MB");
   });
 });
+
+describe("exceedsRequestLimit with a platform limit", () => {
+  it("applies the given limit plus slack", () => {
+    const vercel = 4.5 * 1024 * 1024;
+    expect(exceedsRequestLimit(vercel, vercel)).toBe(false);
+    expect(exceedsRequestLimit(vercel + 100 * 1024, vercel)).toBe(false);
+    expect(exceedsRequestLimit(vercel + 1024 * 1024, vercel)).toBe(true);
+    expect(exceedsRequestLimit(10 * 1024 * 1024)).toBe(false);
+  });
+});

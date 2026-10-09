@@ -7,6 +7,7 @@ export type StudioDraft = {
   videoSource: string;
   targetLanguage: string;
   glossaries: { id: string; source: string; target: string }[];
+  muxVideo: boolean;
   takes: number;
 };
 
@@ -15,6 +16,7 @@ export const EMPTY_DRAFT: StudioDraft = {
   videoSource: "",
   targetLanguage: "",
   glossaries: [],
+  muxVideo: false,
   takes: 1,
 };
 

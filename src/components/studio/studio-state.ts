@@ -35,6 +35,7 @@ export type StudioFormState = {
   targetLanguage: string;
   glossaries: GlossaryRow[];
   referenceImage: ReferenceImageItem | null;
+  muxVideo: boolean;
   takes: number;
 };
 
@@ -45,10 +46,11 @@ export const EMPTY_FORM: StudioFormState = {
   targetLanguage: "",
   glossaries: [],
   referenceImage: null,
+  muxVideo: false,
   takes: 1,
 };
 
-type TextField = "prompt" | "audios" | "video" | "targetLanguage" | "glossaries" | "config" | "image";
+type TextField = "prompt" | "audios" | "video" | "targetLanguage" | "glossaries" | "config" | "image" | "mux";
 
 export type FieldErrors = Partial<Record<TextField, string>> & {
   clips?: Record<string, string>;
@@ -136,8 +138,19 @@ function clipErrors(mode: StudioMode, form: StudioFormState): { clips?: Record<s
   return { clips: Object.keys(clips).length > 0 ? clips : undefined, total: overTotal };
 }
 
-function inlineAudioBytes(form: StudioFormState): number {
-  return form.referenceAudios.reduce((sum, item) => sum + (item.source.startsWith("data:") ? item.source.length : 0), 0);
+function inlineUploadBytes(form: StudioFormState): number {
+  const audio = form.referenceAudios.reduce((sum, item) => sum + (item.source.startsWith("data:") ? item.source.length : 0), 0);
+  const image = form.referenceImage?.source.startsWith("data:") ? form.referenceImage.source.length : 0;
+  return audio + image;
+}
+
+export type FormLimits = { maxRequestBytes: number };
+
+function requestLimitMessage(uploadBytes: number, limit: number): string {
+  const size = describeSize(uploadBytes);
+  return limit < MAX_REQUEST_BYTES
+    ? `Uploads are about ${size}, but this deployment accepts at most ${describeSize(limit)} per request. Paste public URLs instead of uploading files.`
+    : `Uploads are about ${size}; the request limit is ${describeSize(limit)}. Use public URLs for some files.`;
 }
 
 function glossaryRowErrors(form: StudioFormState): FieldErrors["glossaryRows"] {
@@ -151,7 +164,7 @@ function glossaryRowErrors(form: StudioFormState): FieldErrors["glossaryRows"] {
   return Object.keys(rows).length > 0 ? rows : undefined;
 }
 
-export function validateStudioForm(mode: StudioMode, form: StudioFormState, config: AudioConfig): ValidationResult {
+export function validateStudioForm(mode: StudioMode, form: StudioFormState, config: AudioConfig, limits: FormLimits = { maxRequestBytes: MAX_REQUEST_BYTES }): ValidationResult {
   const errors: FieldErrors = {};
   const parsed = generateRequestSchema.safeParse(buildBase(mode, form, config));
   if (!parsed.success) {
@@ -170,8 +183,11 @@ export function validateStudioForm(mode: StudioMode, form: StudioFormState, conf
     errors.audios ??= `${Object.keys(clip.clips).length === 1 ? "A clip is" : "Some clips are"} outside the allowed length. Trim or replace ${Object.keys(clip.clips).length === 1 ? "it" : "them"}.`;
   }
   if (clip.total) errors.audios ??= clip.total;
-  if (exceedsRequestLimit(inlineAudioBytes(form))) {
-    errors.audios ??= `Uploaded audio is about ${describeSize(inlineAudioBytes(form))}; the request limit is ${describeSize(MAX_REQUEST_BYTES)}. Use public URLs for some clips.`;
+  const uploadBytes = inlineUploadBytes(form);
+  if (exceedsRequestLimit(uploadBytes, limits.maxRequestBytes)) {
+    const message = requestLimitMessage(uploadBytes, limits.maxRequestBytes);
+    if (form.referenceAudios.length > 0 || !form.referenceImage) errors.audios ??= message;
+    else errors.image ??= message;
   }
 
   if (MODE_DEFINITIONS[mode].usesPrompt && form.prompt.trim()) {
@@ -182,6 +198,10 @@ export function validateStudioForm(mode: StudioMode, form: StudioFormState, conf
   if (MODE_DEFINITIONS[mode].referenceImage && form.referenceImage?.width && form.referenceImage.height) {
     const problem = describeImageProblem(form.referenceImage.width, form.referenceImage.height);
     if (problem) errors.image = problem;
+  }
+
+  if (mode === "video-translation" && form.muxVideo && config.outputFormat === "pcm") {
+    errors.mux = "Raw PCM can't be combined with video. Choose wav, mp3 or ogg to create the dubbed video.";
   }
 
   const rows = mode === "video-translation" ? glossaryRowErrors(form) : undefined;

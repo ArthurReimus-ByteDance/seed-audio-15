@@ -5,9 +5,11 @@ import type { GenerateRequest } from "@/lib/seed-audio/schemas";
 
 const generateAudio = vi.fn();
 const buildHistoryEntry = vi.fn();
+const muxDubbedVideo = vi.fn();
 const toast = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() };
 
 vi.mock("@/lib/api/seed-audio", () => ({ generateAudio: (...args: unknown[]) => generateAudio(...args) }));
+vi.mock("@/lib/api/mux", async (importOriginal) => ({ ...(await importOriginal<object>()), muxDubbedVideo: (...args: unknown[]) => muxDubbedVideo(...args) }));
 vi.mock("@/lib/history-persist", () => ({ buildHistoryEntry: (...args: unknown[]) => buildHistoryEntry(...args) }));
 vi.mock("sonner", () => ({ toast }));
 
@@ -33,6 +35,7 @@ beforeEach(() => {
   useJobsStore.setState({ jobs: [] });
   useHistoryStore.setState({ entries: [] });
   generateAudio.mockReset();
+  muxDubbedVideo.mockReset();
   buildHistoryEntry.mockReset();
   Object.values(toast).forEach((fn) => fn.mockReset());
   buildHistoryEntry.mockImplementation(async (_request, title: string) => ({ id: crypto.randomUUID(), createdAt: 1, mode: "text-to-audio", title, prompt: "Hello", config: {}, tracks: [], usage: null }));
@@ -133,5 +136,99 @@ describe("jobs store", () => {
     const options = toast.success.mock.calls[0][1] as { action: { onClick: () => void } };
     options.action.onClick();
     expect(navigate).toHaveBeenCalledWith("/studio/text-to-audio");
+  });
+});
+
+describe("dubbed video", () => {
+  const dubRequest: GenerateRequest = { mode: "video-translation", video: "https://media.example.com/source.mp4", targetLanguage: "ja", glossaries: [], config: {} };
+  const submitDub = async (muxVideo: boolean) => {
+    const [id] = useJobsStore.getState().submit({ request: dubRequest, title: "Video Dubbing", takes: 1, muxVideo });
+    await settle();
+    return id;
+  };
+  const mux = () => jobs()[0].result?.mux;
+
+  beforeEach(() => generateAudio.mockImplementation(async () => run()));
+
+  it("combines the dub with the original video automatically when asked", async () => {
+    muxDubbedVideo.mockResolvedValue(new Blob(["mp4-bytes"], { type: "video/mp4" }));
+    await submitDub(true);
+    await settle();
+    expect(muxDubbedVideo).toHaveBeenCalledWith(dubRequest.video, { url: "x", blob: expect.any(Blob) }, expect.any(AbortSignal));
+    expect(mux()).toMatchObject({ status: "done", size: 9 });
+    expect(mux()?.url).toMatch(/^blob:/);
+    expect(toast.success).toHaveBeenCalledWith("Dubbed video is ready");
+  });
+
+  it("does nothing automatically when not asked, and can be started by hand", async () => {
+    muxDubbedVideo.mockResolvedValue(new Blob(["x"]));
+    const id = await submitDub(false);
+    expect(muxDubbedVideo).not.toHaveBeenCalled();
+    expect(mux()).toBeNull();
+    await useJobsStore.getState().createDubbedVideo(id);
+    expect(mux()?.status).toBe("done");
+  });
+
+  it("reports a failure, allows trying again, and toasts the reason", async () => {
+    muxDubbedVideo.mockRejectedValueOnce(new Error("ffmpeg not installed")).mockResolvedValueOnce(new Blob(["ok"]));
+    const id = await submitDub(true);
+    await settle();
+    expect(mux()).toMatchObject({ status: "failed", error: "ffmpeg not installed" });
+    expect(toast.error).toHaveBeenCalledWith("ffmpeg not installed");
+    await useJobsStore.getState().createDubbedVideo(id);
+    expect(mux()?.status).toBe("done");
+  });
+
+  it("ignores a second request while one is running and supports cancel", async () => {
+    muxDubbedVideo.mockImplementation((_url: string, _blob: Blob, signal: AbortSignal) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new RequestCancelled()))));
+    const id = await submitDub(true);
+    await settle();
+    expect(mux()?.status).toBe("running");
+    void useJobsStore.getState().createDubbedVideo(id);
+    expect(muxDubbedVideo).toHaveBeenCalledTimes(1);
+    useJobsStore.getState().cancelDubbedVideo(id);
+    await settle();
+    expect(mux()).toBeNull();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("never muxes jobs that are not dubbing", async () => {
+    const [id] = useJobsStore.getState().submit({ request, title: "t", takes: 1, muxVideo: true });
+    await settle();
+    await useJobsStore.getState().createDubbedVideo(id);
+    expect(muxDubbedVideo).not.toHaveBeenCalled();
+  });
+
+  it("revokes both the audio and the video URLs when the result is dismissed", async () => {
+    muxDubbedVideo.mockResolvedValue(new Blob(["x"]));
+    const id = await submitDub(true);
+    await settle();
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    useJobsStore.getState().dismiss(id);
+    expect(revoke).toHaveBeenCalledTimes(2);
+    revoke.mockRestore();
+  });
+});
+
+describe("completion toasts", () => {
+  it("are skipped when the user is already looking at that studio page, but errors never are", async () => {
+    vi.stubGlobal("window", { location: { pathname: "/studio/text-to-audio" } });
+    generateAudio.mockImplementationOnce(async () => run()).mockRejectedValueOnce(new Error("boom"));
+    useJobsStore.getState().submit({ request, title: "t", takes: 1 });
+    await settle();
+    expect(toast.success).not.toHaveBeenCalled();
+    useJobsStore.getState().submit({ request, title: "t", takes: 1 });
+    await settle();
+    expect(toast.error).toHaveBeenCalledWith("boom");
+    vi.unstubAllGlobals();
+  });
+
+  it("still appear when the user is on another page", async () => {
+    vi.stubGlobal("window", { location: { pathname: "/library" } });
+    generateAudio.mockImplementation(async () => run());
+    useJobsStore.getState().submit({ request, title: "t", takes: 1 });
+    await settle();
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
   });
 });

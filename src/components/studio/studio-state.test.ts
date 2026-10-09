@@ -208,3 +208,49 @@ describe("reference image", () => {
     expect(voice.ok).toBe(true);
   });
 });
+
+describe("dubbed video option", () => {
+  const dub = { videoSource: "https://x.test/s.mp4", targetLanguage: "ja" };
+
+  it("is fine for wav, mp3 and ogg, and for the default format", () => {
+    for (const outputFormat of [undefined, "wav", "mp3", "ogg_opus"] as const) {
+      expect(validateStudioForm("video-translation", form({ ...dub, muxVideo: true }), { outputFormat }).ok, String(outputFormat)).toBe(true);
+    }
+  });
+
+  it("is blocked for raw PCM, which ffmpeg cannot read without parameters", () => {
+    expect(validateStudioForm("video-translation", form({ ...dub, muxVideo: true }), { outputFormat: "pcm" })).toMatchObject({ ok: false, errors: { mux: expect.stringContaining("PCM") } });
+  });
+
+  it("does not matter when the option is off or in other modes", () => {
+    expect(validateStudioForm("video-translation", form({ ...dub, muxVideo: false }), { outputFormat: "pcm" }).ok).toBe(true);
+    expect(validateStudioForm("text-to-audio", form({ prompt: "Hi", muxVideo: true }), { outputFormat: "pcm" }).ok).toBe(true);
+  });
+});
+
+describe("platform upload limit", () => {
+  const vercel = { maxRequestBytes: Math.floor(4.5 * 1024 * 1024) };
+  const upload = (id: string, chars: number) => ({ ...clip(id, `data:audio/wav;base64,${"A".repeat(chars)}`), origin: "file" as const });
+
+  it("blocks uploads over a small platform limit with an explanation that points to URLs", () => {
+    const result = validateStudioForm("reference-voice", form({ prompt: "(@Audio1) says hi", referenceAudios: [upload("a", 6_000_000)] }), {}, vercel);
+    expect(result).toMatchObject({ ok: false, errors: { audios: expect.stringMatching(/this deployment accepts at most 4\.5 MB.*public URLs/) } });
+  });
+
+  it("allows the same upload where the limit is larger, and small uploads on both", () => {
+    const big = form({ prompt: "(@Audio1) says hi", referenceAudios: [upload("a", 6_000_000)] });
+    expect(validateStudioForm("reference-voice", big, {}).ok).toBe(true);
+    const small = form({ prompt: "(@Audio1) says hi", referenceAudios: [upload("a", 3_000_000)] });
+    expect(validateStudioForm("reference-voice", small, {}, vercel).ok).toBe(true);
+  });
+
+  it("counts an uploaded reference image toward the limit and reports it on the image field", () => {
+    const image = { name: "i.png", source: `data:image/png;base64,${"A".repeat(6_000_000)}`, origin: "file" as const, width: 800, height: 600 };
+    expect(validateStudioForm("text-to-audio", form({ prompt: "Hi", referenceImage: image }), {}, vercel)).toMatchObject({ ok: false, errors: { image: expect.stringContaining("this deployment") } });
+    expect(validateStudioForm("text-to-audio", form({ prompt: "Hi", referenceImage: image }), {}).ok).toBe(true);
+  });
+
+  it("does not count URL sources", () => {
+    expect(validateStudioForm("reference-voice", form({ prompt: "(@Audio1) says hi", referenceAudios: [clip("a")] }), {}, vercel).ok).toBe(true);
+  });
+});
