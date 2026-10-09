@@ -27,7 +27,8 @@ Set `SEED_AUDIO_API_KEY` in `.env.local` (the model ID and endpoint are pre-fill
 | `SEED_AUDIO_MAX_CONCURRENCY` | In-flight requests the server allows (extra requests queue) | `2` |
 | `SEED_AUDIO_AUDIO_HOSTS` | Extra hosts the audio proxy may fetch from (https only), comma separated | `.volces.com`, `.bytepluses.com` |
 | `FFMPEG_PATH` | Path to an ffmpeg binary that overrides `PATH` and the bundled one | auto |
-| `STUDIO_ACCESS_CODE` | When set, every page and API route requires this code (httpOnly session cookie) | off |
+| `STUDIO_ACCESS_CODE` | The app password. When set, every page and API route requires it (httpOnly session cookie). In production the app refuses to serve (503) while it is unset | required in production |
+| `STUDIO_ALLOW_OPEN` | Set to `true` to serve a production build without a password, for example on a private network | off |
 
 ## Features
 
@@ -67,7 +68,7 @@ flowchart LR
 - **Server-side key.** `/api/generate` validates the request with the shared zod schema, builds the upstream payload, and calls Seed Audio through a 2-slot queue that matches the key's concurrency limit.
 - **Audio proxy.** Generated audio is served through `/api/audio`, which only fetches `https` URLs on allowlisted hosts and never follows redirects.
 - **Browser storage.** History metadata lives in `localStorage` and the audio blobs in IndexedDB, because the API's presigned links expire after about a day. Nothing is stored on the server.
-- **Access control.** Without `STUDIO_ACCESS_CODE`, anyone who can reach a deployment can spend the configured key, so run it locally or set a code. The code gate is a single shared secret, not per-user accounts, and it has no brute-force lockout, so put it behind your own access control for anything public.
+- **Access control.** A production build refuses to serve until `STUDIO_ACCESS_CODE` is set, because otherwise anyone who can reach the deployment could spend the configured key. Local development (`npm run dev`) stays open unless you set a code. The code gate is a single shared secret, not per-user accounts, and it has no brute-force lockout, so put it behind your own access control for anything public.
 - **Dubbed video security.** `/api/mux` downloads the original video on the server, so it accepts only public `https` URLs, refuses private, loopback and cloud-metadata addresses (including after redirects), caps the download at 200 MB, passes ffmpeg its arguments without a shell, and always deletes its temporary files.
 - **Request size.** The API limits requests to 64 MB, so large uploads are validated against that before sending. Prefer public URLs for big files.
 
