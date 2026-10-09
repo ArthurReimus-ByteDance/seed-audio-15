@@ -13,12 +13,16 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: which generation commands hang
+      - name: mux variants
         run: |
           F=node_modules/ffmpeg-static/ffmpeg
-          t() { echo "--- $1"; shift; timeout 20 "$@" </dev/null; echo "exit $?"; }
-          t "video+sine mp4" $F -y -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=25 -f lavfi -i sine=frequency=300 -t 4 -c:v libx264 -pix_fmt yuv420p -c:a aac /tmp/v.mp4
-          t "sine wav -t 2" $F -y -hide_banner -loglevel error -f lavfi -i sine=frequency=880 -t 2 /tmp/a.wav
-          t "sine wav -t as input option" $F -y -hide_banner -loglevel error -f lavfi -t 2 -i sine=frequency=880 /tmp/a2.wav
-          t "sine wav with duration=" $F -y -hide_banner -loglevel error -f lavfi -i sine=frequency=880:duration=2 /tmp/a3.wav
-          t "sine mp3 -t 2" $F -y -hide_banner -loglevel error -f lavfi -i sine=frequency=880 -t 2 /tmp/a.mp3
+          t() { echo "--- $1"; shift; timeout -s KILL 20 "$@" </dev/null; echo "exit $?"; }
+          $F -y -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=25 -f lavfi -i sine=frequency=300 -t 4 -c:v libx264 -pix_fmt yuv420p -c:a aac /tmp/v.mp4 </dev/null
+          $F -y -hide_banner -loglevel error -f lavfi -i sine=frequency=880 -t 2 /tmp/a.wav </dev/null
+          $F -y -hide_banner -loglevel error -f lavfi -i sine=frequency=880 -t 9 /tmp/long.wav </dev/null
+          BASE="-y -hide_banner -loglevel error -i /tmp/v.mp4 -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 192k"
+          t "A current: apad + shortest (short dub)" $F -y -hide_banner -loglevel error -i /tmp/v.mp4 -i /tmp/a.wav -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 192k -af apad -shortest /tmp/A.mp4
+          t "B apad + -t 4 (short dub)" $F -y -hide_banner -loglevel error -i /tmp/v.mp4 -i /tmp/a.wav -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 192k -af apad -t 4 /tmp/B.mp4
+          t "B2 apad + -t 4 (long dub)" $F -y -hide_banner -loglevel error -i /tmp/v.mp4 -i /tmp/long.wav -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 192k -af apad -t 4 /tmp/B2.mp4
+          t "C apad=whole_dur=4 (short dub)" $F -y -hide_banner -loglevel error -i /tmp/v.mp4 -i /tmp/a.wav -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 192k -af apad=whole_dur=4 -t 4 /tmp/C.mp4
+          for f in B B2 C; do echo "== $f"; $F -hide_banner -i /tmp/$f.mp4 2>&1 | grep -E "Duration|Stream"; done
