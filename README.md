@@ -83,6 +83,12 @@ The app deploys to Vercel as is. Set `SEED_AUDIO_API_KEY` and `SEED_AUDIO_MODEL`
 | Concurrency | The 2-slot limiter lives in memory per function instance. Several instances can exceed the key's limit of 2, so expect occasional 429s from upstream under load. |
 | Licence | `ffmpeg-static` ships a GPL build of ffmpeg. Check that it suits how you distribute the app. |
 
+### CI and deploys
+
+- `.github/workflows/ci.yml` runs lint, type check, tests and the build, plus the Python helper tests, on every pull request and push to `main`.
+- `.github/workflows/deploy.yml` deploys `main` to production with the Vercel CLI after CI passes. It needs the repository secret `VERCEL_TOKEN` and the repository variables `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`, and skips itself when the token is missing.
+- Alternatively, install the Vercel GitHub app for the repository and run `vercel git connect`. Vercel then deploys every push and creates previews for pull requests, and `deploy.yml` can be deleted.
+
 ## Project layout
 
 | Path | Contents |
