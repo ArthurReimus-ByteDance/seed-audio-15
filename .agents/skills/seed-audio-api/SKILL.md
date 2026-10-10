@@ -113,5 +113,6 @@ JSON
 - **Reference image:** `{"type": "image_url", "image_url": {"url": ...}, "role": "reference_image"}`, by URL or inline base64 (verified). Only one, 300-6000 px per side, and **only with plain text prompts**: combining it with `audio_url` or `video_url` returns 400.
 - Unknown top-level request fields are ignored silently, not rejected.
 - **Speaker ID:** `audio_url` accepts `speaker://<id>`, `data:audio/*;base64,*`, `http(s)://` and `file://` (the API's own error text; `tos://` and `asset://` are rejected) and an unknown ID returns 404. The helper and the web app do not offer speaker IDs because no way to obtain one was found, so this is unverified with a real ID.
+- **No pronunciation control (tested Oct. 9, 2026):** dubbing glossary targets are plain text. Respellings, IPA (with or without slashes) and SSML-style `<phoneme>` tags did not reliably change how a brand name was spoken; the same request varies run to run (12 blinded Spanish dubs, 3 per variant). Markup is not read aloud. Do not promise phoneme-level control.
 - Do not exceed 2 concurrent requests per key; throttle batch jobs.
 - Keep generated audio, reference clips, and keys out of git (`outputs/` and `.env` are ignored).
