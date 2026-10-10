@@ -1,8 +1,8 @@
 "use client";
 
-import { Lock } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { BytePlusLogo } from "@/components/brand/byteplus-logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -41,9 +41,7 @@ export function LoginForm() {
         <CardContent>
           <form onSubmit={submit} className="space-y-5">
             <div className="flex flex-col items-center gap-2 text-center">
-              <span className="flex size-11 items-center justify-center rounded-xl bg-brand-soft text-brand">
-                <Lock className="size-5" />
-              </span>
+              <BytePlusLogo className="mb-1 h-7" />
               <h1 className="text-lg font-semibold tracking-tight">Seed Audio Studio</h1>
               <p className="text-sm text-muted-foreground">Enter the access code to continue.</p>
             </div>

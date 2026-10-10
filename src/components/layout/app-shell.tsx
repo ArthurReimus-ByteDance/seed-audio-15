@@ -3,6 +3,7 @@
 import { Menu } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { BytePlusMark } from "@/components/brand/byteplus-logo";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SidebarNav } from "./sidebar-nav";
@@ -23,6 +24,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Open navigation">
             <Menu className="size-5" />
           </Button>
+          <BytePlusMark className="h-4" />
           <span className="text-sm font-semibold tracking-tight">Seed Audio Studio</span>
         </header>
         <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-8 sm:px-8 lg:py-10">{children}</main>

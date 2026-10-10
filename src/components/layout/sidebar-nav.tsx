@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { BytePlusLogo } from "@/components/brand/byteplus-logo";
 import { MODE_DEFINITIONS, STUDIO_MODES } from "@/lib/seed-audio/modes";
 import { cn } from "@/lib/utils";
 import { HOME_ITEM, MODE_HREFS, MODE_ICONS, RESOURCE_ITEMS, type NavItem } from "./nav-items";
@@ -47,12 +48,8 @@ function NavSection({ title, items, onNavigate }: { title?: string; items: NavIt
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col gap-6 p-4">
-      <Link href="/" onClick={onNavigate} className="flex items-center gap-2.5 px-2 pt-1">
-        <span className="flex size-8 items-center justify-center rounded-lg bg-foreground text-background">
-          <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-            <path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4" />
-          </svg>
-        </span>
+      <Link href="/" onClick={onNavigate} className="flex flex-col gap-3 px-2 pt-1" aria-label="Seed Audio Studio home">
+        <BytePlusLogo className="h-6" />
         <span className="leading-tight">
           <span className="block text-sm font-semibold tracking-tight">Seed Audio Studio</span>
           <span className="block text-[11px] text-muted-foreground">Model 1.5 · Early access</span>
