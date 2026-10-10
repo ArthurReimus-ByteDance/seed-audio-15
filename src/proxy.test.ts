@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ACCESS_COOKIE, accessToken } from "@/lib/access/token";
-import { proxy } from "./proxy";
+import { config, proxy } from "./proxy";
 
 const request = (path: string, cookie?: string) => new NextRequest(`https://studio.example.com${path}`, cookie ? { headers: { cookie: `${ACCESS_COOKIE}=${cookie}` } } : undefined);
 const configure = (env: Record<string, string>) => Object.entries(env).forEach(([key, value]) => vi.stubEnv(key, value));
@@ -63,5 +63,17 @@ describe("access gate without a password", () => {
   it("stays open during local development", async () => {
     configure({ NODE_ENV: "development" });
     expect((await proxy(request("/"))).headers.get("x-middleware-next")).toBe("1");
+  });
+});
+
+describe("gate matcher", () => {
+  const matches = (path: string) => new RegExp(`^${config.matcher[0]}$`).test(path);
+
+  it("covers pages and API routes", () => {
+    for (const path of ["/", "/studio/text-to-audio", "/api/generate", "/login"]) expect(matches(path)).toBe(true);
+  });
+
+  it("leaves static assets public so the login page can show the logo", () => {
+    for (const path of ["/brand/byteplus-logo.png", "/brand/byteplus-logo-dark.png", "/icon.svg", "/favicon.ico", "/_next/static/chunks/a.js"]) expect(matches(path)).toBe(false);
   });
 });
